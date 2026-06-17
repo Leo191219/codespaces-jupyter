@@ -1,7 +1,20 @@
-# GitHub Codespaces ♥️ Jupyter Notebooks
+# High-Performance Intraday Lead-Lag Statistical Arbitrage Pipeline
 
-Welcome to your shiny new codespace! We've got everything fired up and running for you to explore Python and Jupyter notebooks.
+An institutional-grade, high-frequency pairs trading backtest engine optimized for memory efficiency and execution speed (*C-Speed* processing). The framework mitigates structural backtesting biases and evaluates statistical lead-lag anomalies across the Nasdaq-100 constituents using QQQ as the market baseline.
 
-You've got a blank canvas to work on from a git perspective as well. There's a single initial commit with what you're seeing right now - where you go from here is up to you!
+## Key Architectural Implementations
 
-Everything you do here is contained within this one codespace. There is no repository on GitHub yet. If and when you’re ready you can click "Publish Branch" and we’ll create your repository and push up your project. If you were just exploring then and have no further need for this code then you can simply delete your codespace and it's gone forever.
+* **Survivorship Bias Mitigation:** Dynamic historical universe depuration via timezone-aware exclusion windows.
+* **Look-Ahead Bias Elimination:** Strict execution of rolling multi-day calculations restricted to trailing market closures ($T-1$).
+* **Memory & Computational Optimization:** Vectorized analytical scaling utilizing `float32` continuous memory blocks and `category` formatting, executing millions of intra-minute operations through pure NumPy matrix arrays.
+* **Risk Management:** Enforces fixed-nominal capital allocation sizing and compulsory 15:55 PM intraday position liquidation to eliminate overnight gap exposure.
+
+## Repository Structure
+
+```text
+├── docs/                     # Academic and research foundations
+│   └── thesis_paper.pdf      # Theoretical framework paper
+├── download_data.py          # Data ingestion and integrity pipeline
+├── backtest_engine.py        # Microstructure simulation & KPI suite
+├── requirements.txt          # System dependencies
+└── .gitignore                # Version control exclusions

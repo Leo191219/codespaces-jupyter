@@ -1,3 +1,20 @@
-notebooks/data
-notebooks/cifar_net.pth
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Data files (CRITICAL: Do not upload massive institutional datasets)
+*.parquet
+*.csv
+*.png
+
+# Virtual environments and containers
+.venv/
+venv/
+ENV/
+.devcontainer/
+
+# IDE and system files
 .ipynb_checkpoints/
+.DS_Store
+Thumbs.db

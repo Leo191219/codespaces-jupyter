@@ -18,3 +18,7 @@ ENV/
 .ipynb_checkpoints/
 .DS_Store
 Thumbs.db
+
+# Permitir subir los resultados finales
+!outputs/*.csv
+!outputs/*.png

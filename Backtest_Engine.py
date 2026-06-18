@@ -6,6 +6,7 @@ import seaborn as sns # Improves plot aesthetics.
 import gc # Destroys unused information to save RAM. Cleaned up after each day.
 from typing import List, Dict, Tuple, Optional # Corporate Type Hinting.
 import gdown # Interacts directly with the Google Drive API.
+import pyarrow.parquet as pq # Reads binary Parquet files in memory-safe batches to avoid out-of-memory crashes.
 
 def download_data(file_id: str, file_name: str) -> None:
     # Data Integrity Check: Drops corrupted or empty downloads (under 1KB) 
@@ -76,11 +77,8 @@ class UniverseManager:
                 restricted_set.update(t_set)
         return [t for t in tickers if t not in restricted_set]
 
-
 class DataEngine:
     def __init__(self, nasdaq_path: str, qqq_path: str):
-        import pyarrow.parquet as pq
-        import gc
         
         print("Mapping sector metadata (Applying Out-of-Core chunking to save RAM)...")
         pf_meta = pq.ParquetFile(nasdaq_path)
@@ -95,7 +93,7 @@ class DataEngine:
         gc.collect()
 
         print("Ingesting and compressing intraday time series in chunks...")
-        # FIX: We avoid RAM spikes during timezone localization by chunking the main dataset
+        # We avoid RAM spikes during timezone localization by chunking the main dataset
         pf_ts = pq.ParquetFile(nasdaq_path)
         ts_chunks = []
         
@@ -314,9 +312,7 @@ class SimulationEngine:
         })
 
 
-# ==============================================================================
 # EXECUTION & KPI REPORTING SUITE
-# ==============================================================================
 if __name__ == "__main__":
     universe = UniverseManager(RESTRICTED_TICKERS)
     engine = DataEngine(nasdaq_path="data/nasdaq100_with_meta.parquet", qqq_path="data/QQQ_1m.parquet")

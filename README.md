@@ -13,8 +13,7 @@ An institutional-grade, high-frequency pairs trading backtest engine optimized f
 
 ```text
 ├── docs/                     # Academic and research foundations
-│   └── thesis_paper.pdf      # Theoretical framework paper
-├── download_data.py          # Data ingestion and integrity pipeline
-├── backtest_engine.py        # Microstructure simulation & KPI suite
+│   └── Quantitative_Report.pdf      # Theoretical framework paper
+├── Backtest_Engine.py        # Microstructure simulation & KPI suite
 ├── requirements.txt          # System dependencies
 └── .gitignore                # Version control exclusions

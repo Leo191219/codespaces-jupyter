@@ -14,6 +14,11 @@ An institutional-grade, high-frequency pairs trading backtest engine optimized f
 ```text
 ├── docs/                     # Academic and research foundations
 │   └── Quantitative_Report.pdf      # Theoretical framework paper
+├── outputs/                     # Code results
+│   └── drawdowns_percentage.png      
+│   └── equity_curve_log.png      
+│   └── equity_curve_output.csv      
+│   └── trade_log_output.csv      
+└── .gitignore                # Version control exclusions
 ├── Backtest_Engine.py        # Microstructure simulation & KPI suite
 ├── requirements.txt          # System dependencies
-└── .gitignore                # Version control exclusions

@@ -21,8 +21,7 @@ def download_data(file_id: str, file_name: str) -> None:
         try:
             gdown.download(id=file_id, output=file_name, quiet=False)
         except Exception as e:
-            # Fault Tolerance: Safely halts the pipeline if critical data is missing, 
-            # preventing hallucinated calculations.
+            # Fault Tolerance: Safely halts the pipeline if critical data is missing.
             print(f"Critical network failure downloading {file_name}: {e}")
             raise RuntimeError(f"Execution aborted: Missing required dataset -> {file_name}") from e
     else:
@@ -30,14 +29,19 @@ def download_data(file_id: str, file_name: str) -> None:
         size_mb = os.path.getsize(file_name) / (1024**2)
         print(f"System ready: {file_name} validated ({size_mb:.2f} MB).")
 
-# DATA INGESTION PIPELINE
+# DATA INGESTION PIPELINE & DIRECTORY SETUP
+
+# Creates necessary infrastructure directories automatically
+os.makedirs('data', exist_ok=True)
+os.makedirs('outputs', exist_ok=True)
+
 # Cloud drive unique identifiers
 QQQ_ID = "1bePMC7Mh3L_xH1YZJ1t7L7GXE7WL8PQh"
 NASDAQ_ID = "1c8ctKH_qV8QrcFn2DUanab7U23_k3Pkw"
 
-# Execute controlled downloads for the required time-series
-download_data(QQQ_ID, "QQQ_1m.parquet")
-download_data(NASDAQ_ID, "nasdaq100_with_meta.parquet")
+# Execute controlled downloads directly into the 'data' folder
+download_data(QQQ_ID, "data/QQQ_1m.parquet")
+download_data(NASDAQ_ID, "data/nasdaq100_with_meta.parquet")
 
 # Corporate visual environment setup
 sns.set_theme(style="whitegrid")
@@ -75,33 +79,57 @@ class UniverseManager:
 
 class DataEngine:
     def __init__(self, nasdaq_path: str, qqq_path: str):
-        print("Mapping sector metadata and scaling attributes...")
-        self.metadata: pd.DataFrame = pd.read_parquet(nasdaq_path, columns=['symbol', 'sic_description', 'market_cap']).drop_duplicates(subset=['symbol'])
+        import pyarrow.parquet as pq
+        import gc
+        
+        print("Mapping sector metadata (Applying Out-of-Core chunking to save RAM)...")
+        pf_meta = pq.ParquetFile(nasdaq_path)
+        meta_chunks = []
+        
+        for batch in pf_meta.iter_batches(columns=['symbol', 'sic_description', 'market_cap'], batch_size=1000000):
+            chunk_df = batch.to_pandas().drop_duplicates(subset=['symbol'])
+            meta_chunks.append(chunk_df)
+            
+        self.metadata = pd.concat(meta_chunks).drop_duplicates(subset=['symbol'])
+        del pf_meta, meta_chunks, chunk_df, batch
+        gc.collect()
 
-        print("Ingesting optimized time series...")
-        self.nasdaq_1m: pd.DataFrame = pd.read_parquet(nasdaq_path, columns=['date', 'symbol', 'close'])
-        self.qqq_1m: pd.DataFrame = pd.read_parquet(qqq_path, columns=['date', 'close'])
+        print("Ingesting and compressing intraday time series in chunks...")
+        # FIX: We avoid RAM spikes during timezone localization by chunking the main dataset
+        pf_ts = pq.ParquetFile(nasdaq_path)
+        ts_chunks = []
+        
+        for batch in pf_ts.iter_batches(columns=['date', 'symbol', 'close'], batch_size=2000000):
+            chunk = batch.to_pandas()
+            
+            # 1. Compress floats immediately
+            chunk['close'] = chunk['close'].astype(np.float32)
+            
+            # 2. Localize timezones in small batches to prevent 3x memory duplication overhead
+            chunk['date'] = pd.to_datetime(chunk['date'])
+            if chunk['date'].dt.tz is None:
+                chunk['date'] = chunk['date'].dt.tz_localize('America/New_York')
+            
+            chunk.set_index('date', inplace=True)
+            ts_chunks.append(chunk)
+            
+        # Consolidate the fully compressed and localized chunks
+        self.nasdaq_1m = pd.concat(ts_chunks)
+        del pf_ts, ts_chunks, chunk, batch
+        gc.collect()
 
-        print("Synchronizing New York timestamps across all datasets...")
-        self.nasdaq_1m['date'] = pd.to_datetime(self.nasdaq_1m['date'])
-        if self.nasdaq_1m['date'].dt.tz is None:
-            self.nasdaq_1m['date'] = self.nasdaq_1m['date'].dt.tz_localize('America/New_York')
-        self.nasdaq_1m.set_index('date', inplace=True)
-
-        if 'date' in self.qqq_1m.columns:
-            self.qqq_1m['date'] = pd.to_datetime(self.qqq_1m['date'])
-            if self.qqq_1m['date'].dt.tz is None:
-                self.qqq_1m['date'] = self.qqq_1m['date'].dt.tz_localize('America/New_York')
-            self.qqq_1m.set_index('date', inplace=True)
-        else:
-            if self.qqq_1m.index.tz is None:
-                self.qqq_1m.index = pd.to_datetime(self.qqq_1m.index).tz_localize('America/New_York')
-
-        print("Executing analytical RAM compression (Float32 & Category matrices)...")
+        print("Executing categorical RAM compression...")
+        # Casting to category AFTER concat prevents index misalignment bloat
         self.nasdaq_1m['symbol'] = self.nasdaq_1m['symbol'].astype('category')
-        self.nasdaq_1m['close'] = self.nasdaq_1m['close'].astype(np.float32)
-        if 'close' in self.qqq_1m.columns:
-            self.qqq_1m['close'] = self.qqq_1m['close'].astype(np.float32)
+
+        print("Processing QQQ Benchmark...")
+        # Benchmark is small enough (25MB) to process in-memory safely
+        self.qqq_1m: pd.DataFrame = pd.read_parquet(qqq_path, columns=['date', 'close'])
+        self.qqq_1m['date'] = pd.to_datetime(self.qqq_1m['date'])
+        if self.qqq_1m['date'].dt.tz is None:
+            self.qqq_1m['date'] = self.qqq_1m['date'].dt.tz_localize('America/New_York')
+        self.qqq_1m.set_index('date', inplace=True)
+        self.qqq_1m['close'] = self.qqq_1m['close'].astype(np.float32)
 
         print("Structuring daily baselines for correlation mapping...")
         self.daily_close: pd.DataFrame = self.nasdaq_1m.groupby([self.nasdaq_1m.index.date, 'symbol'], observed=True)['close'].last().unstack()
@@ -113,7 +141,6 @@ class DataEngine:
         print("Data architecture consolidated successfully.")
 
     def generate_top_50_pairs(self, target_date: pd.Timestamp, universe: UniverseManager) -> List[Tuple[str, str]]:
-        # Extracts a strict 60-day lagging window to calculate Pearson correlations without look-ahead bias
         local_date = target_date.tz_localize(None)
         historical_returns = self.daily_returns.loc[:local_date - pd.Timedelta(days=1)].tail(60)
         
@@ -132,7 +159,6 @@ class DataEngine:
         candidate_pairs = []
         tickers = list(correlation_matrix.columns)
 
-        # Iterates through unique combinations to match intra-sector assets
         for i in range(len(tickers)):
             for j in range(i + 1, len(tickers)):
                 t1, t2 = tickers[i], tickers[j]
@@ -141,12 +167,10 @@ class DataEngine:
                     rho = correlation_matrix.at[t1, t2]
                     
                     if not np.isnan(rho):
-                        # Leader designation is strictly dictated by market capitalization
                         leader = t1 if mcap_map.get(t1, 0) > mcap_map.get(t2, 0) else t2
                         follower = t2 if leader == t1 else t1
                         candidate_pairs.append((rho, leader, follower))
 
-        # Sorts matches descending by Pearson rho and trims to the optimal Top 50 subset
         candidate_pairs.sort(key=lambda x: x[0], reverse=True)
         return [(item[1], item[2]) for item in candidate_pairs[:50]]
 
@@ -295,7 +319,7 @@ class SimulationEngine:
 # ==============================================================================
 if __name__ == "__main__":
     universe = UniverseManager(RESTRICTED_TICKERS)
-    engine = DataEngine(nasdaq_path="nasdaq100_with_meta.parquet", qqq_path="QQQ_1m.parquet")
+    engine = DataEngine(nasdaq_path="data/nasdaq100_with_meta.parquet", qqq_path="data/QQQ_1m.parquet")
     simulator = SimulationEngine(engine, initial_capital=1000000.0)
 
     trade_log = simulator.run_backtest(universe)
@@ -369,7 +393,7 @@ if __name__ == "__main__":
         plt.ylabel('Portfolio Valuation ($) - Log Scale', fontsize=12, fontweight='bold')
         plt.legend(loc='upper left')
         plt.tight_layout()
-        plt.savefig('equity_curve_log.png', dpi=300)
+        plt.savefig('outputs/equity_curve_log.png', dpi=300)
         plt.show()
 
         plt.figure()
@@ -380,16 +404,16 @@ if __name__ == "__main__":
         plt.ylabel('Drawdown (%)', fontsize=12, fontweight='bold')
         plt.legend(loc='lower left')
         plt.tight_layout()
-        plt.savefig('drawdowns_percentage.png', dpi=300)
+        plt.savefig('outputs/drawdowns_percentage.png', dpi=300)
         plt.show()
 
         # CSV Logging
         equity_export = pd.DataFrame({'Strategy_Equity': strategy_equity, 'Benchmark_Equity': benchmark_equity})
         equity_export['Strategy_Equity'] = equity_export['Strategy_Equity'].ffill().fillna(simulator.initial_capital)
-        equity_export.to_csv('equity_curve_output.csv')
-        trade_log.to_csv('trade_log_output.csv', index=False)
+        equity_export.to_csv('outputs/equity_curve_output.csv')
+        trade_log.to_csv('outputs/trade_log_output.csv', index=False)
         
         print("PROCESS SUCCESSFULLY COMPLETED!")
-        print("Exported files:\n1. 'equity_curve_output.csv'\n2. 'trade_log_output.csv'")
+        print("Exported files:\n1. 'outputs/equity_curve_output.csv'\n2. 'outputs/trade_log_output.csv'")
     else:
         print("Critical anomaly: The backtest transactional ledger returned empty.")
